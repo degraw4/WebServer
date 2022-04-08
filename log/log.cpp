@@ -19,6 +19,7 @@ Log::~Log()
         fclose(m_fp);
     }
 }
+
 // 异步需要设置阻塞队列的长度，同步不需要设置
 // "./ServerLog", 2000, 800000, 800/0
 // 异步则初始化队列，然后根据时间创建日志文件
@@ -82,19 +83,19 @@ void Log::write_log(int level, const char *format, ...)
     switch (level)
     {
     case 0:
-        strcpy(s, "[debug]:");
+        strcpy(s, "[DEBUG]:");
         break;
     case 1:
-        strcpy(s, "[info]:");
+        strcpy(s, "[INFO]:");
         break;
     case 2:
-        strcpy(s, "[warn]:");
+        strcpy(s, "[WARN]:");
         break;
     case 3:
-        strcpy(s, "[erro]:");
+        strcpy(s, "[ERRO]:");
         break;
     default:
-        strcpy(s, "[info]:");
+        strcpy(s, "[INFO]:");
         break;
     }
     // 写入一个log，对m_count++, m_split_lines最大行数
@@ -132,8 +133,8 @@ void Log::write_log(int level, const char *format, ...)
     string log_str;
     m_mutex.lock();
 
-    // 写入的具体时间内容格式
-    int n = snprintf(m_buf, 48, "%d-%02d-%02d %02d:%02d:%02d.%06ld %s ",
+    // 时间格式
+    int n = snprintf(m_buf, 48, "%d-%02d-%02d %02d:%02d:%02d.%02ld %s ",
                      my_tm.tm_year + 1900, my_tm.tm_mon + 1, my_tm.tm_mday,
                      my_tm.tm_hour, my_tm.tm_min, my_tm.tm_sec, now.tv_usec, s);
     

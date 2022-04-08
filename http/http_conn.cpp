@@ -91,7 +91,6 @@ void modfd(int epollFd, int fd, int ev, int TRIGMode){
 // 关闭连接
 void HttpConn::closeConn(bool real_close){
     if (real_close && (socketFd != -1)){
-        printf("close %d\n", socketFd);
         removefd(epollFd, socketFd);
         socketFd = -1;
         userCount--;

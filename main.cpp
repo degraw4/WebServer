@@ -2,8 +2,8 @@
 
 int main(int argc, char *argv[]){
     // MySQL
-    string MySQLUser = "root";
-    string MySQLPasswd = "123456";
+    string MySQLUser = "debian-sys-maint";
+    string MySQLPasswd = "AyoPBTUoOY857Tog";
     string DatabaseName = "webdb";
 
     // 命令行解析

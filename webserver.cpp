@@ -12,7 +12,7 @@ WebServer::WebServer(){
     strcat(rootPath, "/root");
 
     // 定时器
-    users_timer = new client_data[MAX_FD];
+    users = new ClientData[MAX_FD];
 }
 
 WebServer::~WebServer(){
@@ -21,7 +21,7 @@ WebServer::~WebServer(){
     close(pipeFd[1]);
     close(pipeFd[0]);
     delete[] httpConns;
-    delete[] users_timer;
+    delete[] users;
     delete threadPool;
     // 数据库连接池不必delete，因为单例模式的static会自动析构
 }
@@ -67,10 +67,10 @@ void WebServer::setTrigMode(){
 void WebServer::setLog(){
     // 异步写日志
     if (1 == logWrite)
-        Log::getInstance()->init("./ServerLog", 2000, 800000, 800);
+        Log::getInstance()->init("./ServerLog.log", 2000, 800000, 800);
     // 同步写日志
     else
-        Log::getInstance()->init("./ServerLog", 2000, 800000, 0);
+        Log::getInstance()->init("./ServerLog.log", 2000, 800000, 0);
 }
 
 void WebServer::setSQLPool(){
@@ -107,8 +107,8 @@ void WebServer::eventListen(){
     ret = listen(listenFd, 5);
     assert(ret >= 0);
 
-    // !!!!!
-    utils.init(TIMESLOT);
+    // 初始化utils
+    utils.init(TIMESLOT, TIMEOUT);
 
     // epoll创建内核事件表
     epoll_event events[MAX_EVENT_NUMBER];
@@ -136,8 +136,8 @@ void WebServer::eventListen(){
     alarm(TIMESLOT);
 
     //工具类,信号和描述符基础操作
-    Utils::u_pipefd = pipeFd;
-    Utils::u_epollfd = epollFd;
+    Utils::pipeFd = pipeFd;
+    Utils::epollFd = epollFd;
 }
 
 // 用connetfd和address注册http_conn，注册client data计时器
@@ -147,37 +147,28 @@ void WebServer::registerNewConnection(int connFd, struct sockaddr_in clientAddre
 
     //初始化client_data数据
     //创建定时器，设置回调函数和超时时间，绑定用户数据，将定时器添加到链表中
-    users_timer[connFd].address = clientAddress;
-    users_timer[connFd].sockfd = connFd;
-    util_timer *timer = new util_timer;
-    timer->user_data = &users_timer[connFd];
-    // call back函数作用是从epoll删除fd，close fd，http连接--
-    timer->cb_func = cb_func;
-    time_t cur = time(NULL);
-    timer->expire = cur + 3 * TIMESLOT;
-    users_timer[connFd].timer = timer;
+    users[connFd].address = clientAddress;
+    users[connFd].socketFd = connFd;
     // 将计时器插入链表
-    utils.m_timer_lst.add_timer(timer);
+    utils.hashedWheelTimer.addTimer(&users[connFd]);
 }
 
 //若有数据传输，则将定时器往后延迟3个单位
 //并对新的定时器在链表上的位置进行调整
-void WebServer::adjustTimer(util_timer *timer){
-    time_t cur = time(NULL);
-    timer->expire = cur + 3 * TIMESLOT;
-    utils.m_timer_lst.adjust_timer(timer);
+void WebServer::adjustTimer(ClientData* user){
+    utils.hashedWheelTimer.adjustTimer(user);
 
     LOG_INFO("%s", "adjust timer once");
 }
 
 // 删除某个连接：删除timer，调用call back
-void WebServer::delateTimer(util_timer *timer, int socketFd){
-    timer->cb_func(&users_timer[socketFd]);
-    if (timer){
-        utils.m_timer_lst.del_timer(timer);
+void WebServer::delateTimer(ClientData* user){
+    callback(user);
+    if(user){
+        utils.hashedWheelTimer.delTimer(user);
     }
 
-    LOG_INFO("close fd %d", users_timer[socketFd].sockfd);
+    LOG_INFO("close fd %d", user->socketFd);
 }
 
 // 接收新链接
@@ -251,7 +242,7 @@ bool WebServer::dealSignal(bool &timeout, bool &stop)
 }
 
 void WebServer::dealRead(int socketFd){
-    util_timer *timer = users_timer[socketFd].timer;
+    ClientData* user = &users[socketFd];
     if (httpConns[socketFd].readOnce()){
         LOG_INFO("deal with the client(%s)", inet_ntoa(httpConns[socketFd].getAddress()->sin_addr));
 
@@ -259,26 +250,26 @@ void WebServer::dealRead(int socketFd){
         // proactor模式下，主线程和工作线程异步处理，主线程只向工作队列中读请求
         // 工作线程读取请求，解析，然后有写回就write
         threadPool->append(httpConns + socketFd);
-        if (timer){
-            adjustTimer(timer);
+        if (user){
+            adjustTimer(user);
         }
     }
     else{
-        delateTimer(timer, socketFd);
+        delateTimer(user);
     }
 }
 
 void WebServer::dealWrite(int socketFd){
-    util_timer *timer = users_timer[socketFd].timer;
+    ClientData* user = &users[socketFd];
     //proactor
     if (httpConns[socketFd].write()){
         LOG_INFO("send data to the client(%s)", inet_ntoa(httpConns[socketFd].getAddress()->sin_addr));
-        if (timer){
-            adjustTimer(timer);
+        if (user){
+            adjustTimer(user);
         }
     }
     else{
-        delateTimer(timer, socketFd);
+        delateTimer(user);
     }
 }
 
@@ -305,8 +296,8 @@ void WebServer::eventLoop(){
             }
             else if (events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)){
                 //服务器端关闭连接，移除对应的定时器
-                util_timer *timer = users_timer[socketFd].timer;
-                delateTimer(timer, socketFd);
+                ClientData* user = &users[socketFd];
+                delateTimer(user);
             }
             //处理信号
             else if ((socketFd == pipeFd[0]) && (events[i].events & EPOLLIN)){
