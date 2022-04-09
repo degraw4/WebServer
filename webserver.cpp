@@ -287,7 +287,7 @@ void WebServer::eventLoop(){
         for (int i = 0; i < number; i++){
             int socketFd = events[i].data.fd;
 
-            //处理新到的客户连接
+            // 处理新到的客户连接
             if (socketFd == listenFd){
                 // 新链接注册http coon和client data，注册epoll注册timer
                 bool flag = dealNewConnection();
@@ -295,20 +295,21 @@ void WebServer::eventLoop(){
                     continue;
             }
             else if (events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)){
-                //服务器端关闭连接，移除对应的定时器
+                // 服务器端关闭连接，移除对应的定时器
                 ClientData* user = &users[socketFd];
                 delateTimer(user);
             }
-            //处理信号
+            // 处理信号
             else if ((socketFd == pipeFd[0]) && (events[i].events & EPOLLIN)){
                 bool flag = dealSignal(timeout, stop);
                 if (false == flag)
                     LOG_ERROR("%s", "dealclientdata failure");
             }
-            //处理客户连接上接收到的数据
+            // 处理客户连接上接收到的数据
             else if (events[i].events & EPOLLIN){
                 dealRead(socketFd);
             }
+            
             else if (events[i].events & EPOLLOUT){
                 dealWrite(socketFd);
             }

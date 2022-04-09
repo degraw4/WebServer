@@ -33,11 +33,11 @@ Config::Config(){
     // 日志写入方式，默认异步
     LogWrite = 1;
     // 触发组合模式，默认listenfd LT + connfd LT
-    TrigMode = 0;
+    TrigMode = 3;
     // listenfd触发模式，默认LT
-    ListenTrigmode = 0;
+    ListenTrigmode = 1;
     // connfd触发模式，默认LT
-    ConnTrigmode = 0;
+    ConnTrigmode = 1;
     // 数据库连接数量，默认8
     SQLConnNum = 8;
     // 线程池内线程数量，默认8

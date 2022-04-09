@@ -134,6 +134,7 @@ void HttpConn::init(){
     m_checked_idx = 0;
     m_read_idx = 0;
     m_write_idx = 0;
+    m_request_and_header = 0;
     cgi = 0;
 
     memset(m_read_buf, '\0', READ_BUFFER_SIZE);
@@ -145,11 +146,19 @@ void HttpConn::init(){
 // 返回值为行的读取状态，有LINE_OK,LINE_BAD,LINE_OPEN
 HttpConn::LINE_STATUS HttpConn::parse_line(){
     char temp;
+
+    // upload
+    if(m_content_length > THRESHOLD 
+    && m_checked_idx == m_request_and_header && m_check_state != 0){
+        return LINE_BAD;
+    }
+
     for (; m_checked_idx < m_read_idx; ++m_checked_idx){
         temp = m_read_buf[m_checked_idx];
         if (temp == '\r'){
-            if ((m_checked_idx + 1) == m_read_idx)
+            if ((m_checked_idx + 1) == m_read_idx){
                 return LINE_OPEN;
+            }
             else if (m_read_buf[m_checked_idx + 1] == '\n'){
                 m_read_buf[m_checked_idx++] = '\0';
                 m_read_buf[m_checked_idx++] = '\0';
@@ -186,7 +195,6 @@ bool HttpConn::readOnce()
         if (bytes_read <= 0){
             return false;
         }
-
         return true;
     }
     // ET
@@ -254,13 +262,15 @@ HttpConn::HTTP_CODE HttpConn::parse_request_line(char *text){
     return NO_REQUEST;
 }
 
-// 解析http请求的一个头部信息
+// 解析http请求的header
 HttpConn::HTTP_CODE HttpConn::parse_headers(char *text){
+    // header已空且m_content_length不为0，说明后面还有content
     if (text[0] == '\0')
     {
         if (m_content_length != 0)
         {
             m_check_state = CHECK_STATE_CONTENT;
+            m_request_and_header = m_checked_idx;
             return NO_REQUEST;
         }
         return GET_REQUEST;
@@ -295,14 +305,24 @@ HttpConn::HTTP_CODE HttpConn::parse_headers(char *text){
 
 // 判断http请求是否被完整读入
 HttpConn::HTTP_CODE HttpConn::parse_content(char *text){
-    if (m_read_idx >= (m_content_length + m_checked_idx))
-    {
-        text[m_content_length] = '\0';
-        //POST请求中最后为输入的用户名和密码
-        m_string = text;
-        return GET_REQUEST;
+    if (m_read_idx >= (m_content_length + m_request_and_header)){
+        // 注册 or 登录
+        if(m_content_length <= THRESHOLD){
+            text[m_content_length] = '\0';
+            // POST请求中最后为输入的用户名和密码
+            m_string = text;
+            return GET_REQUEST;
+        }
+        // 上传
+        else{
+            text[m_content_length] = '\0';
+            return GET_REQUEST;
+        }
     }
-    return NO_REQUEST;
+    // 没有完整读入
+    else{
+        return NO_REQUEST;
+    }
 }
 
 // 对读到http conn的报文内容进行解析
@@ -313,7 +333,12 @@ HttpConn::HTTP_CODE HttpConn::process_read(){
 
     while ((m_check_state == CHECK_STATE_CONTENT && line_status == LINE_OK) || ((line_status = parse_line()) == LINE_OK))
     {
+        // get_line用于将指针向后偏移，指向未处理的字符
+        // m_read_buf + m_start_line
+        // m_start_line是行在buffer中的起始位置，将该位置后面的数据赋给text
+        // 此时从状态机已提前将一行的末尾字符\r\n变为\0\0，所以text可以直接取出完整的行进行解析
         text = get_line();
+        // 已经解析的字符个数 = m_read_buf读取的位置m_checked_idx
         m_start_line = m_checked_idx;
         LOG_INFO("%s", text);
         switch (m_check_state)
@@ -321,6 +346,8 @@ HttpConn::HTTP_CODE HttpConn::process_read(){
         case CHECK_STATE_REQUESTLINE:
         {
             ret = parse_request_line(text);
+            // 只解析头部，http code仍为NO_REQUEST
+            // cgi存储来请求为GET or POST
             if (ret == BAD_REQUEST)
                 return BAD_REQUEST;
             break;
@@ -332,6 +359,7 @@ HttpConn::HTTP_CODE HttpConn::process_read(){
                 return BAD_REQUEST;
             else if (ret == GET_REQUEST)
             {
+                // 没有请求内容，则生成响应报文
                 return do_request();
             }
             break;
@@ -351,6 +379,7 @@ HttpConn::HTTP_CODE HttpConn::process_read(){
     return NO_REQUEST;
 }
 
+// 将请求对应的响应html内容读入m_file_address中
 HttpConn::HTTP_CODE HttpConn::do_request(){
     strcpy(m_real_file, doc_root);
     int len = strlen(doc_root);
@@ -420,6 +449,7 @@ HttpConn::HTTP_CODE HttpConn::do_request(){
         }
     }
 
+    // 注册
     if (*(p + 1) == '0')
     {
         char *m_url_real = (char *)malloc(sizeof(char) * 200);
@@ -428,6 +458,7 @@ HttpConn::HTTP_CODE HttpConn::do_request(){
 
         free(m_url_real);
     }
+    // 登录
     else if (*(p + 1) == '1')
     {
         char *m_url_real = (char *)malloc(sizeof(char) * 200);
@@ -436,6 +467,7 @@ HttpConn::HTTP_CODE HttpConn::do_request(){
 
         free(m_url_real);
     }
+    // 浏览图片
     else if (*(p + 1) == '5')
     {
         char *m_url_real = (char *)malloc(sizeof(char) * 200);
@@ -444,6 +476,7 @@ HttpConn::HTTP_CODE HttpConn::do_request(){
 
         free(m_url_real);
     }
+    // 浏览视频
     else if (*(p + 1) == '6')
     {
         char *m_url_real = (char *)malloc(sizeof(char) * 200);
@@ -452,6 +485,7 @@ HttpConn::HTTP_CODE HttpConn::do_request(){
 
         free(m_url_real);
     }
+    // about
     else if (*(p + 1) == '7')
     {
         char *m_url_real = (char *)malloc(sizeof(char) * 200);
@@ -460,8 +494,58 @@ HttpConn::HTTP_CODE HttpConn::do_request(){
 
         free(m_url_real);
     }
-    else
+    // 上传文件
+    else if (*(p + 1) == '8')
+    {
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/upload.html");
+        strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+        free(m_url_real);
+    }
+    // upload
+    else if (*(p + 1) == '4'){
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/upload_over.html");
+        strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+        free(m_url_real);
+
+        m_string = new char[m_content_length];
+        memcpy(m_string, m_read_buf + m_checked_idx, m_content_length);
+
+        auto c = strchr(m_string, '\n');
+        int head_len = strchr(m_string, '\n') - m_string;
+        int tail_len = head_len + 4;
+        int name_start = strstr(m_string, "filename=") - m_string + 10;
+        int name_end = strchr(m_string + name_start, '\"') - m_string;
+        char *file_name = new char[name_end - name_start];
+        memcpy(file_name, m_string + name_start, name_end - name_start);
+
+        int file_start = strstr(m_string + name_end + 5, "\r\n") - m_string + 4;
+        int file_end = m_content_length - tail_len - 1;
+
+        char *file_path = new char[strlen(file_name) + strlen("./root/file/") + 1];
+        strcpy(file_path, "./root/file/");
+        strcat(file_path, file_name);
+        FILE *fp = fopen(file_path, "w+");
+        fwrite(m_string + file_start, 1, file_end - file_start, fp);
+        fclose(fp);
+        delete [] file_name;
+        delete [] file_path;
+        delete [] m_string;
+    }
+    // 下载文件
+    else if (*(p + 1) == '9')
+    {
+        system("tree -H '.' -L 3 -I '*.ico|*.html' ./root/ --noreport --charset utf-8 -o ./root/download.html");
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/download.html");
+        strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+
+        free(m_url_real);
+    }
+    else{
         strncpy(m_real_file + len, m_url, FILENAME_LEN - len - 1);
+    }
 
     if (stat(m_real_file, &m_file_stat) < 0)
         return NO_RESOURCE;
@@ -641,6 +725,7 @@ void HttpConn::process(){
         modfd(epollFd, socketFd, EPOLLIN, m_TRIGMode);
         return;
     }
+    // 调用process_write完成报文响应，不是发送文件，而是发送响应的html
     bool write_ret = process_write(read_ret);
     if (!write_ret){
         closeConn();
