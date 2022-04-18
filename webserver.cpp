@@ -67,7 +67,7 @@ void WebServer::setTrigMode(){
 void WebServer::setLog(){
     // 异步写日志
     if (1 == logWrite)
-        Log::getInstance()->init("./ServerLog.log", 2000, 800000, 800);
+        Log::getInstance()->init("./ServerLog.log", 2000, 800000, 1024);
     // 同步写日志
     else
         Log::getInstance()->init("./ServerLog.log", 2000, 800000, 0);

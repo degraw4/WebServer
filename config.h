@@ -39,9 +39,9 @@ Config::Config(){
     // connfd触发模式，默认LT
     ConnTrigmode = 1;
     // 数据库连接数量，默认8
-    SQLConnNum = 8;
+    SQLConnNum = 16;
     // 线程池内线程数量，默认8
-    ThreadNum = 8;
+    ThreadNum = 16;
 }
 
 void Config::parse_arg(int argc, char*argv[]){
